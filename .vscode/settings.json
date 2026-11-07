@@ -1,0 +1,32 @@
+{
+    "cSpell.words": [
+        "accum",
+        "anisodiff",
+        "argwhere",
+        "cval",
+        "fdata",
+        "firstconv",
+        "imgout",
+        "keepdim",
+        "Malik",
+        "maxs",
+        "mgrid",
+        "multiclass",
+        "natsorted",
+        "ndimage",
+        "neighbour",
+        "newaxis",
+        "nibabel",
+        "Nifti",
+        "nimg",
+        "Otsu",
+        "Perona",
+        "ploton",
+        "randn",
+        "regionprops",
+        "savez",
+        "sitk",
+        "skimage",
+        "stackout"
+    ]
+}

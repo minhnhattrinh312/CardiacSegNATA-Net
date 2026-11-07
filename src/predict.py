@@ -1,0 +1,111 @@
+import glob
+import os
+import sys
+from pathlib import Path
+
+import torch
+from hydra import compose, initialize_config_dir
+from natsort import natsorted
+from tqdm import tqdm
+
+src_dir = Path(__file__).resolve().parents[0]
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
+from segment2d import NATA_Net
+from segment2d.utils import *
+
+PROJECT_ROOT = src_dir.parent
+config_dir = PROJECT_ROOT / "config"
+saved_model_dir = PROJECT_ROOT / "saved_models"
+save_dir = os.environ.get("OUTPUT_DIR", "./output")
+input_dir = os.environ.get("INPUT_DIR", "./input")
+os.makedirs(save_dir, exist_ok=True)
+with initialize_config_dir(version_base=None, config_dir=str(config_dir)):
+    cfg_data = compose(config_name="data_config")
+    cfg_train = compose(config_name="train_config")
+
+num_classes_dict = {}
+for cmr_type in cfg_data.CMR_MULTI:
+    num_classes_dict[cmr_type] = {}
+    for cmr_view in cfg_data.CMR_MULTI[cmr_type]:
+        num_classes_dict[cmr_type][cmr_view] = cfg_data.CMR_MULTI[cmr_type][cmr_view].num_classes
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+weights_dict = {
+    "CINE_MULTI": {
+        "fold1": "dice_0.8720.ckpt",
+        "fold2": "dice_0.8848.ckpt",
+        "fold3": "dice_0.8836.ckpt",
+        "fold4": "epoch-epoch=019.ckpt",
+        "fold5": "epoch-epoch=019.ckpt",  # epoch19
+    },
+    # "LGE_MULTI": {
+    # "fold1": "dice_0.7438.ckpt",  # 7438v1
+    # "fold2": "dice_0.6361.ckpt",
+    # "fold3": "dice_0.6647.ckpt",  # 6647
+    # "fold4": "dice_0.7254.ckpt",
+    # "fold5": "epoch=399.ckpt",  # best 6970
+    # },
+    "LGE_MULTI": {
+        "fold1": "lge_epoch=299.ckpt",
+        "fold2": "lge_0.6527.ckpt",
+        "fold3": "lge_0.6564.ckpt",
+        "fold4": "lge_epoch=299.ckpt",
+        "fold5": "lge_epoch=299.ckpt",
+    },
+}
+
+for i, cmr_type_path in enumerate(glob.glob(os.path.join(input_dir, "CMR-MULTI/*MULTI")), start=1):
+    # if "cine" in cmr_type_path.lower():
+    #     continue  # skip cine for now
+    print(f"Processing {cmr_type_path}...")
+    cmr_type = os.path.basename(cmr_type_path)
+    task_dir = f"task{i}_{cmr_type.lower().split('_')[0]}"
+    os.makedirs(os.path.join(save_dir, task_dir), exist_ok=True)
+    # loops through all folders in the cmr_type_path
+    for cmr_view_path in glob.glob(os.path.join(cmr_type_path, "*VAL")):
+        print(f"Processing {cmr_type} - {cmr_view_path}...")
+        cmr_view = os.path.basename(cmr_view_path).split("_")[0]
+        os.makedirs(os.path.join(save_dir, task_dir, cmr_view), exist_ok=True)
+        list_patient = natsorted(glob.glob(os.path.join(cmr_view_path, "image/*")))
+        model = NATA_Net(in_channels=cfg_train.INPUT_DIM_MODEL, head_classes=num_classes_dict[cmr_type])
+        model = model.to(device)
+        model = torch.compile(model)
+        for case_count, image_path in enumerate(tqdm(list_patient), start=1):
+            patient_name = os.path.basename(image_path)
+            data = preprocess_data_nii(image_path, cmr_type=cmr_type)
+            num_class = num_classes_dict[cmr_type][cmr_view]
+            prob = np.zeros((data["image"].shape[0], num_class, data["image"].shape[2], data["image"].shape[3]))
+            for fold in range(1, 6):
+                try:
+                    checkpoint = torch.load(
+                        saved_model_dir
+                        / f"{cmr_type.split('_')[0]}_fold{fold}/{weights_dict[cmr_type][f'fold{fold}']}",
+                        map_location=device,
+                    )
+                    state_dict = {k.replace("model.", ""): v for k, v in checkpoint["state_dict"].items()}
+                    model.load_state_dict(state_dict)
+                    model = model.eval()
+                    probability_output = predict_patches(
+                        data["image"],
+                        model,
+                        view=cmr_view,
+                        num_classes=num_classes_dict[cmr_type][cmr_view],
+                        batch_size=8,
+                        device=device, # type: ignore
+                    )
+                    # probability_output shape (n, num_classes, dim_resize, dim_resize)
+                    prob += probability_output
+                except Exception as e:
+                    print(f"Error loading model for {cmr_type} fold {fold}: {e}")
+                    continue
+            # calculate the argmax of the average probability
+            seg = np.argmax(prob, axis=1).transpose(1, 2, 0)  # shape (dim_resize, dim_resize, n)
+            seg = postprocess_multiclass_volume(seg, min_size=200, hole_area=100, smooth_radius=0, keep_largest=False)
+            if cmr_type == "LGE_MULTI" and cmr_view == "SAX":
+                seg = postprocess_scar_between_lv_myo_3d(seg, min_ratio=0.03)
+            # seg = postprocess_multiclass_volume(seg, min_size=200, hole_area=100, smooth_radius=0, keep_largest=False)
+
+            invert_seg = restore_mask(seg, data["restore_info"])
+            save_patient_path = os.path.join(save_dir, task_dir, cmr_view, patient_name)
+            save_nii(save_patient_path, invert_seg, data["affine"], data["header"])
