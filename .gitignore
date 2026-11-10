@@ -3,7 +3,9 @@ __pycache__/
 *.py[codz]
 *$py.class
 paper/
-
+.vscode/
+.claude/
+graphify-out/
 # C extensions
 *.so
 uv*

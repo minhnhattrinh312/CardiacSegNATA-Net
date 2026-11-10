@@ -29,7 +29,7 @@ from segment2d.utils import (
 )
 
 config_dir = PROJECT_ROOT / "config"
-WEIGHTS = PROJECT_ROOT / "saved_models/CINE/dice_0.8878-v1.ckpt"  # best CINE weights from scripts/04_train_CINE.py
+WEIGHTS = PROJECT_ROOT / "saved_models/CINE/last.ckpt"  # best CINE weights from scripts/04_train_CINE.py
 DATA_DIR = PROJECT_ROOT / "data/ACDC_database/testing"
 PRED_DIR = PROJECT_ROOT / "output/ACDC_testset"
 OUT_DIR = PROJECT_ROOT / "output"
