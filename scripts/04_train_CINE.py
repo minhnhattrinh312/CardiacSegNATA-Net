@@ -67,10 +67,8 @@ def load_files(cfg_data):
 def find_cine_checkpoint():
     """Best-dice CINE checkpoint, falling back to last.ckpt. Returns None if there is none."""
     best = sorted(glob.glob(os.path.join(CINE_CKPT_DIR, "dice_*.ckpt")))
-    if best:
-        return best[-1]
     last = os.path.join(CINE_CKPT_DIR, "last.ckpt")
-    return last if os.path.exists(last) else None
+    return last if os.path.exists(last) else (best[-1] if best else None)
 
 
 def main():
@@ -135,19 +133,22 @@ def main():
         verbose=True,
         save_weights_only=True,
         auto_insert_metric_name=False,
-        save_last=True,
     )
-
+    last_ckpt = ModelCheckpoint(
+        dirpath=save_dir,
+        filename="last",
+        monitor=None,
+        save_top_k=1,
+        save_last=False,
+        save_weights_only=True,
+        every_n_epochs=1,
+        save_on_train_epoch_end=True,
+        enable_version_counter=False,
+        verbose=True,
+    )
     # Initialize a LearningRateMonitor callback to log the learning rate during training
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     # Initialize a EarlyStopping callback to stop training if the validation dice does not improve for a certain number of epochs
-    early_stopping = EarlyStopping(
-        monitor="avg_val_dice",
-        mode="max",
-        patience=cfg_train.PATIENCE_ES,
-        verbose=True,
-        strict=False,
-    )
 
     # Define a dictionary with the parameters for the Trainer object
     PARAMS_TRAINER = {
@@ -157,12 +158,11 @@ def main():
         "enable_progress_bar": True,
         # "overfit_batches" :5,
         "logger": wandb_logger,
-        "callbacks": [check_point, early_stopping, lr_monitor],
+        "callbacks": [check_point, last_ckpt, lr_monitor],
         "log_every_n_steps": 1,
         "num_sanity_val_steps": 3,
         "max_epochs": cfg_train.EPOCHS,
         "precision": cfg_train.PRECISION,
-
     }
 
     # If transfer learning is enabled, continue from the best CINE weights (weights only: the optimizer,

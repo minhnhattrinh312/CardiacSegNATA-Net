@@ -29,9 +29,9 @@ from segment2d.utils import (
 )
 
 config_dir = PROJECT_ROOT / "config"
-WEIGHTS = PROJECT_ROOT / "saved_models/CINE/last.ckpt"  # best CINE weights from scripts/04_train_CINE.py
-DATA_DIR = PROJECT_ROOT / "data/ACDC_database/testing"
-PRED_DIR = PROJECT_ROOT / "output/ACDC_testset"
+WEIGHTS = PROJECT_ROOT / "saved_models" / "CINE" / "last.ckpt"  # best CINE weights from scripts/04_train_CINE.py
+DATA_DIR = PROJECT_ROOT / "data" / "ACDC_database" / "testing"
+PRED_DIR = PROJECT_ROOT / "output" / "ACDC_testset"
 OUT_DIR = PROJECT_ROOT / "output"
 BATCH_SIZE = 8
 # ACDC: 1 = RV, 2 = MYO, 3 = LV; the model uses 1 = LV, 2 = MYO, 3 = RV (same swap in both directions)
@@ -65,7 +65,7 @@ def predict_frame(model, image_path, num_classes, device):
     images = data["image"]
     prob = predict_patches(images, model, view="SAX", num_classes=num_classes, batch_size=BATCH_SIZE, device=device)
     seg = np.argmax(prob, axis=1).transpose(1, 2, 0)  # (dim, dim, n_slices)
-    seg = postprocess_multiclass_volume(seg, min_size=800, hole_area=100, smooth_radius=0, keep_largest=False)
+    seg = postprocess_multiclass_volume(seg, min_size=200, hole_area=0, smooth_radius=0, keep_largest=False)
     return restore_mask(seg, data["restore_info"]).astype(np.uint8), data
 
 
@@ -86,7 +86,9 @@ def write_markdown(df, md_path, weight_path, n_patients):
     ]
     lines += ["| Class | Dice | HD95 (mm) | Vol. diff (mL) |", "|---|---|---|---|"]
     for name in CLASSES:
-        lines.append(f"| {name} | {df[f'dice_{name}'].mean():.4f} | {df[f'hd95_{name}'].mean():.3f} | {df[f'voldiff_{name}'].mean():.3f} |")
+        lines.append(
+            f"| {name} | {df[f'dice_{name}'].mean():.4f} | {df[f'hd95_{name}'].mean():.3f} | {df[f'voldiff_{name}'].mean():.3f} |"
+        )
     for group, members in GROUPS.items():
         dice = df[[f"dice_{m}" for m in members]].mean(axis=1).mean()
         hd = df[[f"hd95_{m}" for m in members]].mean(axis=1).mean()
@@ -123,7 +125,7 @@ def main():
             save_nii(str(PRED_DIR / f"{patient}_frame{frame:02d}.nii.gz"), pred_acdc, data["affine"], data["header"])
 
             gt_nii = nib.load(gt_path)
-            gt = remap_mask(gt_nii.get_fdata().astype(np.uint8) , LABEL_MAP)  # to model convention
+            gt = remap_mask(gt_nii.get_fdata().astype(np.uint8), LABEL_MAP)  # to model convention
             spacing = gt_nii.header.get_zooms()[:3]  # type: ignore
             voxel_vol = np.prod(spacing) / 1000.0  # mm^3 -> mL
             row = {"patient": patient, "frame": frame, "phase": phase_of_frame[frame]}

@@ -105,8 +105,6 @@ class Segmenter_MultiView(pl.LightningModule):
             for i, values in class_dict.items():
                 if values:
                     metrics[f"val_dice_{view}_{i}"] = torch.mean(torch.stack(values))
-                else:
-                    metrics[f"val_dice_{view}_{i}"] = torch.tensor(0.0, device=self.device)
 
         # Compute overall mean dice
         all_dice = [v for k, v in metrics.items() if k.startswith("val_dice_")]

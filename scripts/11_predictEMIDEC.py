@@ -8,6 +8,7 @@ import torch
 from hydra import compose, initialize_config_dir
 from medpy.metric.binary import dc
 from natsort import natsorted
+from scipy import ndimage
 from tqdm import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -25,12 +26,16 @@ from segment2d.utils import (
 )
 
 config_dir = PROJECT_ROOT / "config"
-WEIGHTS = PROJECT_ROOT / "saved_models/LGE/lge_0.7279.ckpt"  # best LGE weights from scripts/07_train_LGE.py
+WEIGHTS = PROJECT_ROOT / "saved_models/LGE/lge_epoch=399.ckpt"  # best LGE weights from scripts/07_train_LGE.py
 DATA_DIR = PROJECT_ROOT / "data/emidec-dataset-1.0.1"
 CSV_PATH = PROJECT_ROOT / "data/csv_files/EMIDEC_SAX_INFARCT_info.csv"  # written by scripts/06_EMIDEC2npz.py
 PRED_DIR = PROJECT_ROOT / "output/EMIDEC_testset"
 OUT_DIR = PROJECT_ROOT / "output"
 BATCH_SIZE = 8
+MIN_INFARCT_FRACTION = 0.025  # predicted infarction below this fraction of the myocardium is treated as noise
+MIN_MVO_VOXELS = (
+    20  # no-reflow components smaller than this (voxels, 3D) are treated as noise (smallest GT MVO: 13 voxels)
+)
 VIEW = "SAX_INFARCT"
 # EMIDEC labels already follow the model convention: 1 = LV, 2 = normal MYO, 3 = MI, 4 = no-reflow (MVO)
 # metric name -> labels that make up the structure
@@ -57,8 +62,34 @@ def predict_case(model, image_path, num_classes, device):
     images = data["image"]
     prob = predict_patches(images, model, view=VIEW, num_classes=num_classes, batch_size=BATCH_SIZE, device=device)
     seg = np.argmax(prob, axis=1).transpose(1, 2, 0)  # (dim, dim, n_slices)
-    seg = postprocess_multiclass_volume(seg, min_size=200, hole_area=50, smooth_radius=0, keep_largest=False)
-    return restore_mask(seg, data["restore_info"]).astype(np.uint8), data
+    # seg = postprocess_multiclass_volume(seg, min_size=200, hole_area=0, smooth_radius=0, keep_largest=False)
+    seg = restore_mask(seg, data["restore_info"]).astype(np.uint8)
+    seg = remove_small_infarction(seg)
+    seg = remove_small_mvo(seg)
+    seg = postprocess_multiclass_volume(seg, min_size=50, hole_area=0, smooth_radius=0, keep_largest=False)
+    return seg, data
+
+
+def remove_small_infarction(seg, min_fraction=MIN_INFARCT_FRACTION):
+    """If infarction (MI + no-reflow) is below `min_fraction` of the myocardium, relabel it as normal myocardium."""
+    myo = np.isin(seg, STRUCTURES["MYO"]).sum()
+    infarction = np.isin(seg, STRUCTURES["MI"]).sum()
+    if myo > 0 and infarction / myo < min_fraction:
+        seg = seg.copy()
+        seg[np.isin(seg, STRUCTURES["MI"])] = 2
+    return seg
+
+
+def remove_small_mvo(seg, min_voxels=MIN_MVO_VOXELS):
+    """Relabel small 3D no-reflow components as infarction (no-reflow always lies inside the infarct)."""
+    labels, n = ndimage.label(seg == 4)
+    if n == 0:
+        return seg
+    sizes = np.bincount(labels.ravel())
+    small = np.isin(labels, [i for i in range(1, n + 1) if sizes[i] < min_voxels])
+    seg = seg.copy()
+    seg[small] = 3
+    return seg
 
 
 def scar_burden(mask):
@@ -108,7 +139,12 @@ def write_markdown(df, md_path, weight_path):
         lines += ["| Structure | Dice | Vol. diff (mL) | Rate (%) |", "|---|---|---|---|"]
         for name in STRUCTURES:
             rate = f"{sub[f'voldiff_rate_{name}'].mean():.2f}" if f"voldiff_rate_{name}" in sub else "-"
-            lines.append(f"| {name} | {sub[f'dice_{name}'].mean():.4f} | {sub[f'voldiff_{name}'].mean():.3f} | {rate} |")
+            lines.append(
+                f"| {name} | {sub[f'dice_{name}'].mean():.4f} | {sub[f'voldiff_{name}'].mean():.3f} | {rate} |"
+            )
+        mean_dice = np.mean([sub[f"dice_{name}"].mean() for name in STRUCTURES])
+        mean_voldiff = np.mean([sub[f"voldiff_{name}"].mean() for name in STRUCTURES])
+        lines.append(f"| **Mean ({len(STRUCTURES)} structures)** | {mean_dice:.4f} | {mean_voldiff:.3f} | - |")
         r = f"{sub['scar_burden_gt'].corr(sub['scar_burden_pred']):.3f}" if sub["scar_burden_gt"].std() > 0 else "-"
         lines += [
             "",

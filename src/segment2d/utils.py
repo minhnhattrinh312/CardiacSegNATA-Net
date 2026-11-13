@@ -584,7 +584,7 @@ def restore_mask(processed_mask: np.ndarray, restore_info: dict) -> np.ndarray:
     return restored
 
 
-def preprocess_data_nii(image_path, dim_resize=256, cmr_type="cine"):
+def preprocess_data_nii(image_path, dim_resize=256):
     data = {}
     image, data["affine"], data["header"] = load_nii(image_path)
     image = preprocess_cmr(image)

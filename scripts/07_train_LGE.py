@@ -159,14 +159,28 @@ def main():
     # Initialize a LearningRateMonitor callback to log the learning rate during training
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
     # Initialize a EarlyStopping callback to stop training if the validation dice does not improve for a certain number of epochs
-    early_stopping = EarlyStopping(
-        monitor="avg_val_dice",
-        mode="max",
-        patience=cfg_train.PATIENCE_ES,
+    last_ckpt = ModelCheckpoint(
+        dirpath=save_dir,
+        filename="last",
+        monitor=None,
+        save_top_k=1,
+        save_last=False,
+        save_weights_only=True,
+        every_n_epochs=1,
+        save_on_train_epoch_end=True,
+        enable_version_counter=False,
         verbose=True,
-        strict=False,
     )
-
+    check_point_epoch = ModelCheckpoint(
+        dirpath=save_dir,
+        filename="lge_{epoch:03d}",
+        every_n_epochs=100,
+        save_top_k=-1,
+        # optional: also save last.ckpt
+        monitor=None,  # no metric ranking
+        save_weights_only=True,
+        auto_insert_metric_name=False,
+    )
     # Define a dictionary with the parameters for the Trainer object
     PARAMS_TRAINER = {
         "accelerator": cfg_train.ACCELERATOR,
@@ -175,7 +189,7 @@ def main():
         "enable_progress_bar": True,
         # "overfit_batches" :5,
         "logger": wandb_logger,
-        "callbacks": [check_point, early_stopping, lr_monitor],
+        "callbacks": [check_point, lr_monitor, last_ckpt, check_point_epoch],
         "log_every_n_steps": 1,
         "num_sanity_val_steps": 5,
         "max_epochs": cfg_train.EPOCHS,
@@ -212,7 +226,6 @@ def main():
             "num_sanity_val_steps": 5,
             "max_epochs": WARMUP_EPOCHS,
             "precision": cfg_train.PRECISION,
-
         }
         segmenter.freeze_model()
         trainer = pl.Trainer(**PARAMS_TRAINER_WARMUP)

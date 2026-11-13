@@ -30,7 +30,7 @@ saved_model_dir = PROJECT_ROOT / "saved_models"
 csv_path = PROJECT_ROOT / "data" / "csv_files"
 
 # Fine-tune the CINE model on ACDC only (SAX view, label convention: 1 = LV, 2 = MYO, 3 = RV).
-PRETRAINED_CKPT = saved_model_dir / "CINE" / "last-v2.ckpt"
+PRETRAINED_CKPT = saved_model_dir / "CINE" / "last.ckpt"
 ACDC_VIEW = "SAX"
 ACDC_CSV = "ACDC_SAX"
 SAVE_DIR = saved_model_dir / "ACDC"
@@ -50,7 +50,7 @@ def load_files():
 def main():
     with initialize_config_dir(version_base=None, config_dir=str(config_dir)):
         cfg_data = compose(config_name="data_config")
-        cfg_train = compose(config_name="train_config", overrides=["LEARNING_RATE=5e-4", "EPOCHS=5000", "DEVICES=[2]"])
+        cfg_train = compose(config_name="train_config", overrides=["LEARNING_RATE=6e-4", "EPOCHS=3000", "DEVICES=[0]"])
 
     print("fine-tuning CINE model on ACDC only...")
     train_files, val_files = load_files()
@@ -118,9 +118,15 @@ def main():
         verbose=True,
         save_weights_only=True,
         auto_insert_metric_name=False,
-        save_last=True,
     )
-
+    last_ckpt = ModelCheckpoint(
+        dirpath=SAVE_DIR,
+        monitor=None,
+        save_top_k=0,
+        save_last=True,
+        save_weights_only=False,
+        save_on_train_epoch_end=True,
+    )
     # Initialize a LearningRateMonitor callback to log the learning rate during training
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
 
@@ -131,7 +137,7 @@ def main():
         "benchmark": True,
         "enable_progress_bar": True,
         "logger": wandb_logger,
-        "callbacks": [check_point, lr_monitor],
+        "callbacks": [check_point, last_ckpt, lr_monitor],
         "log_every_n_steps": 1,
         "num_sanity_val_steps": 3,
         "max_epochs": cfg_train.EPOCHS,
