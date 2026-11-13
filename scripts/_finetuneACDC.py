@@ -121,11 +121,15 @@ def main():
     )
     last_ckpt = ModelCheckpoint(
         dirpath=SAVE_DIR,
+        filename="last",
         monitor=None,
-        save_top_k=0,
-        save_last=True,
-        save_weights_only=False,
+        save_top_k=1,
+        save_last=False,
+        save_weights_only=True,
+        every_n_epochs=1,
         save_on_train_epoch_end=True,
+        enable_version_counter=False,
+        verbose=True,
     )
     # Initialize a LearningRateMonitor callback to log the learning rate during training
     lr_monitor = LearningRateMonitor(logging_interval="epoch")
