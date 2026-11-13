@@ -110,8 +110,6 @@ class Segmenter_MultiView(pl.LightningModule):
         all_dice = [v for k, v in metrics.items() if k.startswith("val_dice_")]
         if all_dice:
             metrics["avg_val_dice"] = torch.mean(torch.stack(all_dice))
-        else:
-            metrics["avg_val_dice"] = torch.tensor(0.0, device=self.device)
         # Clear stored step outputs
         self.validation_step_outputs = []
 
