@@ -29,21 +29,28 @@ config_dir = PROJECT_ROOT / "config"
 saved_model_dir = PROJECT_ROOT / "saved_models"
 csv_path = PROJECT_ROOT / "data" / "csv_files"
 
-# Fine-tune the CINE model on ACDC only (SAX view, label convention: 1 = LV, 2 = MYO, 3 = RV).
+# Fine-tune the CINE model on ACDC + M&Ms (SAX view, label convention: 1 = LV, 2 = MYO, 3 = RV).
 PRETRAINED_CKPT = saved_model_dir / "CINE" / "last.ckpt"
-ACDC_VIEW = "SAX"
-ACDC_CSV = "ACDC_SAX"
-SAVE_DIR = saved_model_dir / "ACDC"
+SAX_VIEW = "SAX"
+SAX_CSVS = ["ACDC_SAX", "MnM_SAX"]  # both already use the model label convention (see data/README.md)
+# same repeat as scripts/04_train_CINE.py: training slices are repeated per epoch (validation slices are not)
+REPEAT_EXTRA = {"ACDC_SAX": 10, "MnM_SAX": 10}
+SAVE_DIR = saved_model_dir / "finetuneSAX"  # where to save the fine-tuned weights
 
 
 def load_files():
-    """Return the ACDC train/val file lists, keyed by view."""
-    csv_file = pd.read_csv(csv_path / f"{ACDC_CSV}_info.csv")
-    # csv paths are relative to the project root
-    paths = csv_file["path"].map(lambda p: str(PROJECT_ROOT / p))  # type: ignore
-    train_files = {ACDC_VIEW: paths[csv_file["type"] == "train"].tolist()}
-    val_files = {ACDC_VIEW: paths[csv_file["type"] == "val"].tolist()}
-    print(f"{ACDC_CSV}: train {len(train_files[ACDC_VIEW])} | val {len(val_files[ACDC_VIEW])}")
+    """Return the ACDC + M&Ms train/val file lists, keyed by view."""
+    train_files, val_files = {SAX_VIEW: []}, {SAX_VIEW: []}
+    for name in SAX_CSVS:
+        csv_file = pd.read_csv(csv_path / f"{name}_info.csv")
+        # csv paths are relative to the project root
+        paths = csv_file["path"].map(lambda p: str(PROJECT_ROOT / p))  # type: ignore
+        train = paths[csv_file["type"] == "train"].tolist()
+        val = paths[csv_file["type"] == "val"].tolist()
+        repeat = REPEAT_EXTRA.get(name, 1)
+        train_files[SAX_VIEW] += train * repeat
+        val_files[SAX_VIEW] += val
+        print(f"{name}: train {len(train)} x{repeat} = {len(train) * repeat} | val {len(val)}")
     return train_files, val_files
 
 
@@ -52,7 +59,7 @@ def main():
         cfg_data = compose(config_name="data_config")
         cfg_train = compose(config_name="train_config", overrides=["LEARNING_RATE=6e-4", "EPOCHS=3000", "DEVICES=[0]"])
 
-    print("fine-tuning CINE model on ACDC only...")
+    print("fine-tuning CINE model on ACDC + M&Ms...")
     train_files, val_files = load_files()
 
     # Same model as CINE: all views keep their heads so the CINE weights load without any change
@@ -101,7 +108,7 @@ def main():
     wandb_logger = (
         WandbLogger(
             project="CardiacSegNATA-Net",
-            name="ACDC",
+            name="finetuneSAX",
             resume=False,
         )
         if cfg_train.LOG_WANDB
